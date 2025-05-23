@@ -1,0 +1,60 @@
+# Зависимости
+node_modules
+/.pnp
+.pnp.js
+
+# Тестирование
+/coverage
+
+# Продакшн
+/build
+
+# Разное
+.DS_Store
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+venv/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# База данных
+*.sqlite3
+*.db
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Кэш и временные файлы
+.cache/
+temp/
+tmp/

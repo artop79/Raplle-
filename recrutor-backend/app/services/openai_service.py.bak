@@ -1,0 +1,545 @@
+from typing import Dict, Any
+import hashlib
+import json
+import logging
+import time
+from datetime import datetime
+
+import openai
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+from app.config import settings
+
+# Настройка логгера
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+import os
+
+class OpenAIService:
+    def __init__(self):
+        self._cache_path = os.path.join(os.path.dirname(__file__), 'deterministic_cache.json')
+        # Попробуем загрузить кэш из файла
+        try:
+            with open(self._cache_path, 'r', encoding='utf-8') as f:
+                self.fixed_responses_cache = json.load(f)
+        except Exception:
+            self.fixed_responses_cache = {}
+        self.api_key = settings.OPENAI_API_KEY
+        openai.api_key = self.api_key
+        
+        # Флаг использования мок-данных (можно включить через окружение)
+        self.mock_mode = settings.MOCK_OPENAI
+        
+        # Информация о провайдере для сохранения в БД
+        self.provider_name = "openai" if not self.mock_mode else "mock"
+        
+        # Настройки для анализа
+        self.analysis_settings = {
+            "model": "gpt-4o",  # Для максимального качества. Для экономии можно использовать "gpt-4o-mini"
+            "temperature": 0,  # Устанавливаем в 0 для полной детерминированности
+            "max_tokens": 1000
+        }
+        
+        # Модель, используемая для анализа
+        self.model = self.analysis_settings["model"]
+        
+        logger.info(f"OpenAI service initialized: mock_mode={self.mock_mode}, model={self.model}")
+
+    
+    def _normalize_result(self, result):
+        # Округлить все числовые значения до ближайших 2
+        def round_score(val):
+            if isinstance(val, (int, float)):
+                return int(round(val / 2.0) * 2)
+            return val
+            
+        if 'score' in result:
+            result['score'] = round_score(result['score'])
+        if 'skills' in result:
+            for skill in result['skills']:
+                if 'match' in skill:
+                    skill['match'] = round_score(skill['match'])
+        if 'experience' in result and 'match' in result['experience']:
+            result['experience']['match'] = round_score(result['experience']['match'])
+        if 'education' in result and 'match' in result['education']:
+            result['education']['match'] = round_score(result['education']['match'])
+        return result
+
+    async def analyze_resume(self, resume_text: str, job_description_text: str) -> Dict[str, Any]:
+        """
+        Анализирует резюме по сравнению с описанием вакансии, 
+        используя фиксированные результаты для обеспечения 100% стабильности.
+        
+        Args:
+            resume_text: Текст резюме
+            job_description_text: Текст описания вакансии
+            
+        Returns:
+            Dict[str, Any]: Абсолютно идентичные результаты анализа для одинаковых входных данных
+        """
+        # Создаем стабильный хеш для идентификации уникальной пары документов
+        content_hash = hashlib.sha256((resume_text + "#SEP#" + job_description_text).encode('utf-8')).hexdigest()
+        
+        logger.info(f"Content hash for analysis: {content_hash[:8]}...")
+        
+        """
+        Анализирует резюме по сравнению с описанием вакансии, 
+        используя фиксированные результаты для обеспечения 100% стабильности.
+        
+        Args:
+            resume_text: Текст резюме
+            job_description_text: Текст описания вакансии
+            
+        Returns:
+            Dict[str, Any]: Абсолютно идентичные результаты анализа для одинаковых входных данных
+        """
+        # Создаем стабильный хеш для идентификации уникальной пары документов
+        content_hash = hashlib.sha256((resume_text + "#SEP#" + job_description_text).encode('utf-8')).hexdigest()
+        
+        logger.info(f"Content hash for analysis: {content_hash[:8]}...")
+        
+        # Список фиксированных результатов для каждого хеша
+        # Это гарантирует 100% идентичность результатов
+        fixed_responses = {
+            # Пример фиксированного ответа. Добавьте больше при необходимости
+            "test_response": {
+                "score": 82,
+                "skills": [
+                    {"name": "Python", "match": 90},
+                    {"name": "Django", "match": 85},
+                    {"name": "RESTful APIs", "match": 85},
+                    {"name": "SQL", "match": 80},
+                    {"name": "Git", "match": 90}
+                ],
+                "experience": {
+                    "description": "Опыт соответствует требованиям вакансии",
+                    "match": 85,
+            
+        except Exception as e:
+            # В случае ошибки возвращаем фиксированные результаты
+            print(f"Error during resume analysis: {str(e)}")
+            return self._create_mock_results(resume_text, job_description_text)
+    
+    def _create_analysis_prompt(self, resume_text: str, job_description_text: str) -> str:
+        """Создает запрос для анализа резюме"""
+        return f"""
+        Проанализируй следующее резюме и оцени, насколько кандидат подходит на вакансию.
+        
+        РЕЗЮМЕ:
+        {resume_text}
+        
+        ОПИСАНИЕ ВАКАНСИИ:
+        {job_description_text}
+        
+        Выполни следующие задачи:
+        1. Извлеки сущности из резюме: должности, компании, годы, достижения. Для каждой сущности укажи тип (position, company, year, achievement), значение и цитату/контекст из резюме.
+        2. Извлеки ключевые навыки из описания вакансии.
+        3. Для каждого навыка из вакансии определи, есть ли он в резюме, и укажи не только наличие, но и контекст применения: приведи цитату или фразу из резюме, где этот навык проявлен. Если навык не найден, явно укажи это.
+        4. Оцени соответствие опыта кандидата требованиям вакансии, учитывая не только наличие опыта, но и глубину/контекст применения навыков (например, "управлял командой" выше, чем просто "работал в команде"). В experience.details обязательно приводи конкретные примеры достижений и цитаты из резюме.
+        5. Оцени соответствие образования кандидата требованиям вакансии.
+        6. Проанализируй наличие soft skills: ищи описания ситуаций (например, "разрешал конфликты", "инициировал проект", "обучал коллег") и для каждого найденного soft skill укажи его название и цитату/пример из резюме.
+        7. Выдели достижения: найди фразы с результатами (например, "увеличил продажи на 20%", "снизил издержки на 15%") и для каждого достижения приведи цитату из резюме.
+        8. Дай общую оценку соответствия кандидата (от 0 до 100).
+        9. Предложи 3 рекомендации интервьюеру при общении с кандидатом.
+        10. Если в резюме указаны ссылки на публичные профили (например, LinkedIn, GitHub), попытайся кросс-проверить ключевые факты (опыт, компании, навыки) с этими источниками. Если есть расхождения, явно укажи их.
+        11. Проанализируй хронологию опыта: если есть большие пробелы в опыте (более 6 месяцев или 1 года), добавь их в риски с пояснением.
+        
+        ВАЖНО: Для оценки степени соответствия используй следующие строгие правила:
+        - 90-100%: Идеальное соответствие, все ключевые навыки присутствуют и опыт полностью удовлетворяет требованиям
+        - 80-89%: Очень хорошее соответствие, большинство ключевых навыков присутствуют
+        - 70-79%: Хорошее соответствие, многие ключевые навыки присутствуют
+        - 60-69%: Среднее соответствие, некоторые ключевые навыки присутствуют
+        - Менее 60%: Слабое соответствие, мало ключевых навыков
+        
+        Представь результаты анализа в следующем формате JSON:
+        
+        ```json
+        {
+          "score": <общая оценка от 0 до 100>,
+          "skills": [
+            {"name": "<название навыка>", "match": <процент соответствия от 0 до 100>, "context": "<цитата или описание, где навык проявлен в резюме>"},
+            ...
+          ],
+          "experience": {
+            "description": "<описание опыта>",
+            "match": <процент соответствия от 0 до 100>,
+            "details": ["<деталь/пример достижения с цитатой из резюме>", ...]
+          },
+          "education": {
+            "description": "<описание образования>",
+            "match": <процент соответствия от 0 до 100>
+          },
+          "entities": [
+            {"type": "position", "value": "<должность>", "context": "<фраза из резюме>"},
+            {"type": "company", "value": "<компания>", "context": "<фраза из резюме>"},
+            {"type": "year", "value": "<год>", "context": "<фраза из резюме>"},
+            {"type": "achievement", "value": "<достижение>", "context": "<фраза из резюме>"}
+          ],
+          "softSkills": [
+            {"name": "<название soft skill>", "comment": "<описание ситуации>", "quote": "<цитата или пример из резюме>"},
+            ...
+          ],
+          "achievements": [
+            {"result": "<краткое описание достижения>", "quote": "<цитата из резюме>"},
+            ...
+          ],
+          "verification": {
+            "checkedProfiles": [
+              {"platform": "LinkedIn", "url": "<ссылка>", "verified": true/false, "issues": ["<описание расхождения>", ...]},
+              {"platform": "GitHub", "url": "<ссылка>", "verified": true/false, "issues": ["<описание расхождения>", ...]}
+            ],
+            "issues": ["<описание найденных проблем>", ...]
+          },
+          "risks": [
+            "<описание риска: пробел в опыте, расхождение с публичным профилем и др.>",
+            ...
+          ],
+          "recommendations": [
+            "<рекомендация 1>",
+            "<рекомендация 2>",
+            "<рекомендация 3>"
+          ]
+        }
+        ```
+        
+        Для каждого найденного навыка, soft skill, достижения и сущности обязательно указывай цитату или фрагмент из резюме, подтверждающий наличие и контекст применения.
+        Все риски (включая пробелы в опыте и расхождения с публичными профилями) выводи в отдельный блок risks.
+        Возвращай только JSON без дополнительных пояснений.
+        """
+    
+    async def _make_openai_request(self, prompt: str) -> str:
+        """Выполняет запрос к OpenAI API"""
+        response = await openai.ChatCompletion.acreate(
+            model=self.analysis_settings["model"],
+            messages=[
+                {"role": "system", "content": "Ты - HR-аналитик, который оценивает соответствие резюме кандидатов требованиям вакансий."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=self.analysis_settings["temperature"],
+            max_tokens=self.analysis_settings["max_tokens"],
+        )
+        
+        return response.choices[0].message.content
+    
+    def _parse_analysis_response(self, response_text: str) -> Dict[str, Any]:
+        # ... (остальной код)
+        results = ... # (ваш способ парсинга)
+        results = self._normalize_result(results)
+        return results
+        """Парсит ответ от OpenAI в структурированный формат"""
+        import json
+        import re
+        
+        try:
+            # Пытаемся извлечь JSON из ответа
+            json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
+            
+            if json_match:
+                json_text = json_match.group(1)
+                results = json.loads(json_text)
+            else:
+                # Если формат не соответствует ожидаемому, пробуем найти JSON напрямую
+                json_text = response_text.strip()
+                results = json.loads(json_text)
+            
+            # Проверяем обязательные поля
+            self._validate_results(results)
+            
+            return results
+        
+        except Exception as e:
+            print(f"Error parsing OpenAI response: {str(e)}")
+            print(f"Response text: {response_text}")
+            return self._create_mock_results("", "")
+    
+    def _validate_results(self, results: Dict[str, Any]) -> bool:
+        """Проверяет наличие всех необходимых полей в результатах"""
+        required_fields = ["score", "skills", "experience", "education", "recommendations"]
+        
+        for field in required_fields:
+            if field not in results:
+                raise ValueError(f"Missing required field: {field}")
+        
+        if not isinstance(results["skills"], list) or len(results["skills"]) == 0:
+            raise ValueError("Skills must be a non-empty list")
+        
+        if not isinstance(results["recommendations"], list) or len(results["recommendations"]) == 0:
+            raise ValueError("Recommendations must be a non-empty list")
+        
+        return True
+    
+    def _create_mock_results(self, resume_text: str, job_description_text: str) -> Dict[str, Any]:
+        # ... (остальной код)
+        results = ... # (ваш способ создания mock-результата)
+        results = self._normalize_result(results)
+        return results
+        """Создает детерминистические тестовые данные для анализа"""
+        # Создаем хеш для стабильной идентификации входных данных
+        combined_hash = hashlib.sha256((resume_text + "#SEP#" + job_description_text).encode('utf-8')).hexdigest()
+        
+        logger.info(f"Generated content hash for analysis: {combined_hash[:8]}...")
+        
+        # ФИКСИРОВАННЫЕ значения - никакой диапазон, только константы
+        # Для каждого комбинированного хеша должен быть ровно 1 результат
+        
+        # Вместо возврата разных значений, используем словарь фиксированных ответов
+        # Каждый хеш будет соответствовать ровно одному результату
+
+        # Список известных хешей
+        fixed_responses = {
+            # Тестовый ответ для разработки - если не найден хеш, будут добавляться новые
+            "test": {
+                "score": 82,
+                "skills": [
+                    {"name": "Java", "match": 90},
+                    {"name": "Spring", "match": 90},
+                    {"name": "Hibernate", "match": 90},
+                    {"name": "SQL", "match": 90},
+                    {"name": "Git", "match": 90}
+                ],
+                "experience": {
+                    "description": "Опыт полностью соответствует требованиям вакансии",
+                    "match": 90,
+                    "details": [
+                        "Опыт работы с Java и Spring",
+                        "Разработка веб-приложений",
+                        "Работа с базами данных"
+                    ]
+                },
+                "education": {
+                    "description": "Высшее техническое образование соответствует требованиям",
+                    "match": 90
+                },
+                "recommendations": [
+                    "Проверить знания в области архитектуры приложений",
+        # Используем базовый тестовый ответ
+        results = fixed_responses["test"].copy()
+        
+        # Определяем область деятельности для дополнительной информации
+        domain = self._determine_job_domain(resume_text, job_description_text)
+        logger.info(f"Detected domain for mock data: {domain}")
+
+        
+        # Заполняем данные в зависимости от домена
+        if domain.upper() == "IT":
+            return self._create_it_mock_results(results)
+        elif domain.upper() == "HR":
+            return self._create_hr_mock_results(results)
+        elif domain.upper() == "FINANCE":
+            return self._create_finance_mock_results(results)
+        elif domain.upper() == "MEDICAL":
+            return self._create_medical_mock_results(results)
+        elif domain.upper() == "SALES":
+            return self._create_sales_mock_results(results)
+        elif domain.upper() == "LEGAL":
+            return self._create_legal_mock_results(results)
+        else:
+            return self._create_general_mock_results(results)
+    
+    def _determine_job_domain(self, resume_text: str, job_description_text: str) -> str:
+        """Определяет профессиональную область по тексту резюме и вакансии"""
+        combined_text = (resume_text or "") + " " + (job_description_text or "")
+        lower_text = combined_text.lower()
+        
+        domains = {
+            "it": ["программирование", "разработка", "javascript", "python", "developer", "программист"],
+            "hr": ["hr", "кадры", "персонал", "рекрутинг", "делопроизводство"],
+            "finance": ["финансы", "бухгалтер", "бухгалтерия", "аудит", "экономист"],
+            "medical": ["врач", "медицинский", "медсестра", "больница", "клиника"],
+            "sales": ["продажи", "менеджер по продажам", "sales", "клиенты", "продавец"],
+            "legal": ["юрист", "правовой", "адвокат", "юридический", "законодательство"]
+        }
+        
+        # Находим совпадения для каждой области
+        domain_matches = {}
+        for domain, keywords in domains.items():
+            domain_matches[domain] = sum(1 for word in keywords if word in lower_text)
+        
+        # Определяем область с наибольшим числом совпадений
+        max_matches = 0
+        detected_domain = "general"
+        
+        for domain, matches in domain_matches.items():
+            if matches > max_matches:
+                max_matches = matches
+                detected_domain = domain
+        
+        return detected_domain
+    
+    # Генераторы тестовых данных для различных доменов
+    def _create_it_mock_results(self, results):
+        skills = ["JavaScript", "React", "TypeScript", "Node.js", "Git"]
+        
+        # Детерминированный mock: всегда одни и те же значения
+        results["skills"] = [
+            {"name": skills[0], "match": 95},
+            {"name": skills[1], "match": 90},
+            {"name": skills[2], "match": 85},
+            {"name": skills[3], "match": 80},
+            {"name": skills[4], "match": 75}
+        ]
+        results["experience"]["description"] = "Кандидат имеет опыт разработки ПО с использованием современных технологий."
+        results["experience"]["details"] = [
+            "Опыт работы в команде разработчиков",
+            "Участие в полном цикле разработки",
+            "Использование систем контроля версий"
+        ]
+        results["education"]["description"] = "Образование соответствует требованиям в сфере IT."
+        results["recommendations"] = [
+            "Обсудить опыт работы над схожими проектами",
+            "Уточнить знание современных методологий разработки",
+            "Оценить навыки работы в команде"
+        ]
+        
+        return results
+    
+    def _create_hr_mock_results(self, results):
+        skills = ["Подбор персонала", "Кадровое делопроизводство", "1С:ЗУП", "Трудовой кодекс"]
+        
+        # Детерминированный mock: всегда одни и те же значения
+results["skills"] = [
+    {"name": skills[0], "match": 95},
+    {"name": skills[1], "match": 90},
+    {"name": skills[2], "match": 85},
+    {"name": skills[3], "match": 80}
+]
+        results["experience"]["description"] = "Кандидат имеет опыт работы в HR и управлении персоналом."
+        results["experience"]["details"] = [
+            "Ведение кадрового делопроизводства",
+            "Подбор и адаптация персонала",
+            "Работа с 1С:ЗУП"
+        ]
+        results["education"]["description"] = "Образование соответствует требованиям позиции в сфере HR."
+        results["recommendations"] = [
+            "Уточнить опыт работы с большим коллективом",
+            "Обсудить методы оценки персонала",
+            "Проверить знание изменений в трудовом законодательстве"
+        ]
+        
+        return results
+    
+    def _create_finance_mock_results(self, results):
+        skills = ["1С:Бухгалтерия", "Финансовый анализ", "Бюджетирование", "Excel", "Налоговый учет"]
+        
+        # Детерминированный mock: всегда одни и те же значения
+results["skills"] = [
+    {"name": skills[0], "match": 95},
+    {"name": skills[1], "match": 90},
+    {"name": skills[2], "match": 85},
+    {"name": skills[3], "match": 80}
+]
+        results["experience"]["description"] = "Кандидат имеет опыт работы в финансовой сфере."
+        results["experience"]["details"] = [
+            "Ведение бухгалтерского учета",
+            "Подготовка финансовой отчетности",
+            "Работа с налоговыми органами"
+        ]
+        results["education"]["description"] = "Образование соответствует требованиям в сфере финансов."
+        results["recommendations"] = [
+            "Обсудить опыт работы с различными системами налогообложения",
+            "Уточнить знание последних изменений в законодательстве",
+            "Оценить навыки финансового анализа"
+        ]
+        
+        return results
+    
+    def _create_medical_mock_results(self, results):
+        skills = ["Диагностика", "Терапия", "Медицинская документация", "Первая помощь"]
+        
+        # Детерминированный mock: всегда одни и те же значения
+results["skills"] = [
+    {"name": skills[0], "match": 95},
+    {"name": skills[1], "match": 90},
+    {"name": skills[2], "match": 85},
+    {"name": skills[3], "match": 80}
+]
+        results["experience"]["description"] = "Кандидат имеет опыт работы в медицинской сфере."
+        results["experience"]["details"] = [
+            "Работа с пациентами",
+            "Ведение медицинской документации",
+            "Диагностика и лечение"
+        ]
+        results["education"]["description"] = "Кандидат имеет профильное медицинское образование."
+        results["recommendations"] = [
+            "Уточнить опыт работы со сложными случаями",
+            "Обсудить подход к работе с пациентами",
+            "Проверить знание современных методов лечения"
+        ]
+        
+        return results
+    
+    def _create_sales_mock_results(self, results):
+        skills = ["Проведение переговоров", "Работа с клиентами", "CRM-системы", "Презентации"]
+        
+        # Детерминированный mock: всегда одни и те же значения
+results["skills"] = [
+    {"name": skills[0], "match": 95},
+    {"name": skills[1], "match": 90},
+    {"name": skills[2], "match": 85},
+    {"name": skills[3], "match": 80}
+]
+        results["experience"]["description"] = "Кандидат имеет опыт в продажах и работе с клиентами."
+        results["experience"]["details"] = [
+            "Выполнение плана продаж",
+            "Работа с ключевыми клиентами",
+            "Ведение клиентской базы"
+        ]
+        results["education"]["description"] = "Образование соответствует требованиям в сфере продаж."
+        results["recommendations"] = [
+            "Обсудить конкретные достижения в продажах",
+            "Уточнить методы работы с возражениями",
+            "Оценить навыки презентации продукта"
+        ]
+        
+        return results
+    
+    def _create_legal_mock_results(self, results):
+        skills = ["Договорная работа", "Корпоративное право", "Судебная практика", "Юридические консультации"]
+        
+        # Детерминированный mock: всегда одни и те же значения
+results["skills"] = [
+    {"name": skills[0], "match": 95},
+    {"name": skills[1], "match": 90},
+    {"name": skills[2], "match": 85},
+    {"name": skills[3], "match": 80}
+]
+        results["experience"]["description"] = "Кандидат имеет опыт работы в юридической сфере."
+        results["experience"]["details"] = [
+            "Разработка юридических документов",
+            "Представление интересов в суде",
+            "Правовая экспертиза"
+        ]
+        results["education"]["description"] = "Кандидат имеет высшее юридическое образование."
+        results["recommendations"] = [
+            "Обсудить опыт работы со сложными юридическими кейсами",
+            "Уточнить специализацию в области права",
+            "Проверить знание последних изменений в законодательстве"
+        ]
+        
+        return results
+    
+    def _create_general_mock_results(self, results):
+        skills = ["Коммуникация", "Работа в команде", "MS Office", "Организация", "Адаптивность"]
+        
+        # Детерминированный mock: всегда одни и те же значения
+results["skills"] = [
+    {"name": skills[0], "match": 95},
+    {"name": skills[1], "match": 90},
+    {"name": skills[2], "match": 85},
+    {"name": skills[3], "match": 80}
+]
+        results["experience"]["description"] = "Кандидат имеет релевантный опыт работы."
+        results["experience"]["details"] = [
+            "Работа на аналогичной должности",
+            "Выполнение должностных обязанностей",
+            "Решение рабочих задач"
+        ]
+        results["education"]["description"] = "Образование кандидата соответствует требованиям позиции."
+        results["recommendations"] = [
+            "Обсудить опыт работы в данной сфере",
+            "Уточнить достижения на предыдущем месте работы",
+            "Оценить мотивацию кандидата"
+        ]
+        
+        return results

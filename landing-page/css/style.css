@@ -1,0 +1,253 @@
+/* Современный стиль для лендинга Raplle */
+body {
+    font-family: 'Inter', sans-serif;
+    margin: 0;
+    color: #222;
+    background: #f7fafd;
+}
+.header {
+    background: linear-gradient(90deg, #1c64f2 0%, #2563eb 100%);
+    color: #fff;
+    padding: 24px 0;
+    box-shadow: 0 4px 24px rgba(28,100,242,0.08);
+}
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+}
+.logo {
+    font-size: 2.3rem;
+    font-weight: 800;
+    letter-spacing: 2px;
+    color: #fff;
+}
+nav {
+    display: flex;
+    gap: 28px;
+}
+nav a {
+    color: #fff;
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 1.1rem;
+    position: relative;
+    transition: color 0.2s;
+}
+nav a::after {
+    content: '';
+    display: block;
+    height: 2px;
+    width: 0;
+    background: #fff;
+    transition: width 0.2s;
+    margin-top: 2px;
+}
+nav a:hover::after {
+    width: 100%;
+}
+.hero {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 60px 0 40px 0;
+    background: linear-gradient(120deg, #e0e7ff 0%, #f7fafd 100%);
+    border-radius: 0 0 36px 36px;
+    box-shadow: 0 8px 32px rgba(28,100,242,0.06);
+}
+.hero-content {
+    flex: 1;
+    min-width: 320px;
+}
+.hero-title {
+    font-size: 3.2rem;
+    font-weight: 800;
+    margin-bottom: 18px;
+    color: #1c64f2;
+}
+.hero-desc {
+    font-size: 1.4rem;
+    margin-bottom: 32px;
+    color: #374151;
+}
+.hero-btn {
+    background: linear-gradient(90deg, #1c64f2 0%, #2563eb 100%);
+    color: #fff;
+    border: none;
+    padding: 18px 40px;
+    font-size: 1.15rem;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 700;
+    box-shadow: 0 2px 12px rgba(28,100,242,0.13);
+    transition: background 0.2s, transform 0.1s;
+}
+.hero-btn:hover {
+    background: #1746a2;
+    transform: translateY(-2px) scale(1.03);
+}
+.hero-img {
+    flex: 1;
+    min-width: 320px;
+    text-align: center;
+}
+.hero-img img {
+    max-width: 420px;
+    width: 100%;
+    border-radius: 24px;
+    box-shadow: 0 10px 36px rgba(28,100,242,0.10);
+}
+.features {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 36px;
+    justify-content: space-between;
+    margin: 70px 0;
+}
+.feature {
+    flex: 1;
+    min-width: 260px;
+    background: #fff;
+    border-radius: 18px;
+    padding: 38px 28px;
+    box-shadow: 0 2px 24px rgba(28,100,242,0.09);
+    transition: transform 0.15s, box-shadow 0.15s;
+    border: 1.5px solid #e0e7ff;
+}
+.feature:hover {
+    transform: translateY(-8px) scale(1.03);
+    box-shadow: 0 12px 36px rgba(28,100,242,0.10);
+}
+.feature h3 {
+    margin-bottom: 12px;
+    color: #1c64f2;
+    font-size: 1.3rem;
+    font-weight: 700;
+}
+.feature p {
+    color: #374151;
+    font-size: 1.07rem;
+}
+.section-title {
+    font-size: 2.2rem;
+    font-weight: 800;
+    margin: 70px 0 30px 0;
+    text-align: center;
+    color: #1c64f2;
+}
+.section {
+    margin-bottom: 70px;
+}
+.tariffs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 32px;
+    justify-content: center;
+}
+.tariff {
+    background: linear-gradient(120deg, #fff 70%, #e0e7ff 100%);
+    border-radius: 18px;
+    padding: 40px 32px;
+    min-width: 260px;
+    text-align: center;
+    box-shadow: 0 2px 24px rgba(28,100,242,0.09);
+    border: 1.5px solid #e0e7ff;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+.tariff:hover {
+    transform: translateY(-8px) scale(1.04);
+    box-shadow: 0 12px 36px rgba(28,100,242,0.12);
+}
+.tariff-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+.tariff-price {
+    font-size: 2.1rem;
+    font-weight: 800;
+    color: #1c64f2;
+    margin-bottom: 18px;
+}
+.tariff-features {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 26px 0;
+    color: #374151;
+    font-size: 1.07rem;
+}
+.tariff-features li {
+    margin-bottom: 7px;
+}
+.tariff-btn {
+    background: linear-gradient(90deg, #1c64f2 0%, #2563eb 100%);
+    color: #fff;
+    border: none;
+    padding: 13px 28px;
+    border-radius: 9px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 1.07rem;
+    transition: background 0.2s, transform 0.1s;
+    box-shadow: 0 2px 12px rgba(28,100,242,0.13);
+}
+.tariff-btn:hover {
+    background: #1746a2;
+    transform: translateY(-2px) scale(1.04);
+}
+.testimonials {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 32px;
+    justify-content: center;
+}
+.testimonial {
+    background: #fff;
+    border-radius: 16px;
+    padding: 28px 24px;
+    min-width: 220px;
+    box-shadow: 0 2px 24px rgba(28,100,242,0.09);
+    border: 1.5px solid #e0e7ff;
+    font-size: 1.07rem;
+    color: #374151;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+.testimonial:hover {
+    transform: translateY(-6px) scale(1.03);
+    box-shadow: 0 10px 32px rgba(28,100,242,0.10);
+}
+.testimonial-author {
+    font-weight: 700;
+    color: #1c64f2;
+    margin-top: 13px;
+    font-size: 1.04rem;
+}
+.footer {
+    background: #222;
+    color: #fff;
+    text-align: center;
+    padding: 28px 0;
+    margin-top: 45px;
+    font-size: 1.07rem;
+    border-radius: 24px 24px 0 0;
+}
+@media (max-width: 900px) {
+    .hero {
+        flex-direction: column;
+        padding: 40px 0 20px 0;
+    }
+    .features, .tariffs, .testimonials {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 18px;
+    }
+    .container {
+        padding: 0 10px;
+    }
+    .hero-title {
+        font-size: 2.1rem;
+    }
+    .section-title {
+        font-size: 1.4rem;
+    }
+}
